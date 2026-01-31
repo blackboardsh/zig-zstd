@@ -45,7 +45,8 @@ pub fn main() !void {
 }
 
 fn parseArgs(allocator: std.mem.Allocator) !Options {
-    var args_it = std.process.args();
+    var args_it = try std.process.argsWithAllocator(allocator);
+    defer args_it.deinit();
     _ = args_it.next();
 
     const mode_arg = args_it.next() orelse {
