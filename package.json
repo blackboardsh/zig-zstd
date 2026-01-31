@@ -1,0 +1,30 @@
+{
+  "name": "zig-zstd",
+  "version": "0.1.0",
+  "description": "Tiny zstd CLI built in Zig with static libzstd",
+  "license": "MIT",
+  "author": "Blackboard Technologies Inc.",
+  "type": "module",
+  "scripts": {
+    "setup": "node scripts/setup.js",
+    "build": "bun run setup && vendors/zig/zig build",
+    "build:release": "bun run setup && vendors/zig/zig build -Doptimize=ReleaseFast",
+    "zig-test": "vendors/zig/zig build test",
+    "test": "bun test-progress.ts",
+    "dev": "node scripts/dev.js",
+    "push:beta": "npm version prerelease --preid=beta && git push origin main --tags",
+    "push:patch": "npm version prepatch --preid=beta && git push origin main --tags",
+    "push:minor": "npm version preminor --preid=beta && git push origin main --tags",
+    "push:major": "npm version premajor --preid=beta && git push origin main --tags",
+    "push:stable": "npm version patch && git push origin main --tags"
+  },
+  "os": [
+    "darwin",
+    "linux",
+    "win32"
+  ],
+  "cpu": [
+    "x64",
+    "arm64"
+  ]
+}

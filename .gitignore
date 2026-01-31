@@ -1,1 +1,29 @@
-# Add files to ignore here
+# Zig build artifacts
+zig-out/
+zig-cache/
+.zig-cache/
+
+# npm artifacts
+node_modules/
+dist/
+
+# Downloaded binaries (from postinstall)
+bin/*
+!bin/.gitkeep
+
+# Vendored dependencies
+vendors/
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Test files
+*.tar.gz
+*.patch
+*.dSYM/
+test-data/
+test-*.zig
+test-*.c
+test-wrapper
+test-pure-c
