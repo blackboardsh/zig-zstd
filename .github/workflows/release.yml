@@ -42,10 +42,6 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.13.0
-
       - uses: actions/setup-node@v4
         with:
           node-version: '18'
@@ -56,11 +52,11 @@ jobs:
 
       - name: Build binaries
         run: |
-          zig build -Doptimize=ReleaseFast
+          vendors/zig/zig build -Doptimize=ReleaseFast
 
       - name: Test
         run: |
-          zig build test
+          vendors/zig/zig build test
 
       - name: Package binaries
         run: |
