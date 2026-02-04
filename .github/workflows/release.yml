@@ -52,7 +52,7 @@ jobs:
 
       - name: Build binaries
         run: |
-          vendors/zig/zig build -Doptimize=ReleaseFast
+          vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline
 
       - name: Test
         run: |
