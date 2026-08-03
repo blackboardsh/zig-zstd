@@ -38,7 +38,6 @@ jobs:
           - os: windows-2025
             platform: win32
             arch: x64
-            zig-target: x86_64-windows-msvc
 
     runs-on: ${{ matrix.os }}
 
@@ -57,8 +56,14 @@ jobs:
           node scripts/setup.js
 
       - name: Build binaries
+        if: matrix.platform != 'win32'
         run: |
           vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline -Dtarget=${{ matrix.zig-target }}
+
+      - name: Build binaries
+        if: matrix.platform == 'win32'
+        run: |
+          vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline
 
       - name: Validate release contract
         run: node --test scripts/release-contract.test.js

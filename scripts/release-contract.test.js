@@ -13,11 +13,14 @@ test("release targets are independent from runner OS versions", () => {
     "x86_64-macos.14.0",
     "x86_64-linux-gnu.2.35",
     "aarch64-linux-gnu.2.35",
-    "x86_64-windows-msvc",
   ]) {
     assert.match(workflow, new RegExp(`zig-target: ${target.replaceAll(".", "\\.")}`));
   }
   assert.match(workflow, /-Dtarget=\$\{\{ matrix\.zig-target \}\}/);
+  assert.match(
+    workflow,
+    /if: matrix\.platform == 'win32'[\s\S]*zig build -Doptimize=ReleaseFast -Dcpu=baseline\n/,
+  );
 });
 
 test("macOS artifacts are checked for the 14.0 deployment target", () => {
