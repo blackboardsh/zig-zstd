@@ -22,18 +22,23 @@ jobs:
           - os: macos-14
             platform: darwin
             arch: arm64
+            zig-target: aarch64-macos.14.0
           - os: macos-15-intel
             platform: darwin
             arch: x64
+            zig-target: x86_64-macos.14.0
           - os: ubuntu-24.04
             platform: linux
             arch: x64
+            zig-target: x86_64-linux-gnu.2.35
           - os: ubuntu-24.04-arm
             platform: linux
             arch: arm64
+            zig-target: aarch64-linux-gnu.2.35
           - os: windows-2025
             platform: win32
             arch: x64
+            zig-target: x86_64-windows-msvc
 
     runs-on: ${{ matrix.os }}
 
@@ -53,7 +58,20 @@ jobs:
 
       - name: Build binaries
         run: |
-          vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline
+          vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline -Dtarget=${{ matrix.zig-target }}
+
+      - name: Validate release contract
+        run: node --test scripts/release-contract.test.js
+
+      - name: Verify macOS deployment target
+        if: matrix.platform == 'darwin'
+        shell: bash
+        run: |
+          minos="$(otool -l zig-out/bin/zig-zstd | awk '$1 == "minos" { print $2; exit }')"
+          if [ "$minos" != "14.0" ]; then
+            echo "zig-zstd requires macOS $minos; expected 14.0"
+            exit 1
+          fi
 
       - name: Test
         run: |
