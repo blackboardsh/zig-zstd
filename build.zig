@@ -4,18 +4,18 @@ pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
-    const libzstd = b.addStaticLibrary(.{
-        .name = "zstd",
+    const libzstd_mod = b.createModule(.{
         .target = target,
         .optimize = optimize,
+        .link_libc = true,
     });
 
     // Disable assembly optimizations to avoid linking issues with missing HUF assembly functions
-    libzstd.defineCMacro("ZSTD_DISABLE_ASM", "1");
+    libzstd_mod.addCMacro("ZSTD_DISABLE_ASM", "1");
     // Enable multithreaded compression when available
-    libzstd.defineCMacro("ZSTD_MULTITHREAD", "1");
+    libzstd_mod.addCMacro("ZSTD_MULTITHREAD", "1");
 
-    libzstd.addCSourceFiles(.{
+    libzstd_mod.addCSourceFiles(.{
         .files = &[_][]const u8{
             "zstd/lib/common/debug.c",
             "zstd/lib/common/entropy_common.c",
@@ -48,34 +48,44 @@ pub fn build(b: *std.Build) void {
         },
     });
 
-    libzstd.linkLibC();
+    const libzstd = b.addLibrary(.{
+        .name = "zstd",
+        .linkage = .static,
+        .root_module = libzstd_mod,
+    });
 
-    const exe = b.addExecutable(.{
-        .name = "zig-zstd",
+    const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    exe.linkLibrary(libzstd);
-    exe.addIncludePath(b.path("zstd/lib"));
+    exe_mod.addIncludePath(b.path("zstd/lib"));
+    exe_mod.linkLibrary(libzstd);
     if (target.result.os.tag == .linux) {
-        exe.linkSystemLibrary("pthread");
+        exe_mod.linkSystemLibrary("pthread", .{});
     }
+
+    const exe = b.addExecutable(.{
+        .name = "zig-zstd",
+        .root_module = exe_mod,
+    });
 
     b.installArtifact(exe);
 
-    const tests = b.addTest(.{
+    const tests_mod = b.createModule(.{
         .root_source_file = b.path("tests.zig"),
         .target = target,
         .optimize = optimize,
     });
-
-    tests.addIncludePath(b.path("zstd/lib"));
-    tests.linkLibrary(libzstd);
+    tests_mod.addIncludePath(b.path("zstd/lib"));
+    tests_mod.linkLibrary(libzstd);
     if (target.result.os.tag == .linux) {
-        tests.linkSystemLibrary("pthread");
+        tests_mod.linkSystemLibrary("pthread", .{});
     }
+
+    const tests = b.addTest(.{
+        .root_module = tests_mod,
+    });
 
     const run_tests = b.addRunArtifact(tests);
     const test_step = b.step("test", "Run zig-zstd tests");

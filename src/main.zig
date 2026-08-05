@@ -29,23 +29,22 @@ const CliError = error{
     ZstdError,
 };
 
-pub fn main() !void {
-    var gpa = std.heap.GeneralPurposeAllocator(.{}){};
-    defer _ = gpa.deinit();
-    const allocator = gpa.allocator();
+pub fn main(init: std.process.Init) !void {
+    const allocator = init.gpa;
+    const io = init.io;
 
-    const opts = try parseArgs(allocator);
+    const opts = try parseArgs(allocator, init.minimal.args);
     defer allocator.free(opts.input_path);
     defer allocator.free(opts.output_path);
 
     switch (opts.mode) {
-        .compress => try compressFile(allocator, opts),
-        .decompress => try decompressFile(allocator, opts),
+        .compress => try compressFile(allocator, io, opts),
+        .decompress => try decompressFile(allocator, io, opts),
     }
 }
 
-fn parseArgs(allocator: std.mem.Allocator) !Options {
-    var args_it = try std.process.argsWithAllocator(allocator);
+fn parseArgs(allocator: std.mem.Allocator, args: std.process.Args) !Options {
+    var args_it = try args.iterateAllocator(allocator);
     defer args_it.deinit();
     _ = args_it.next();
 
@@ -139,8 +138,7 @@ fn parseArgs(allocator: std.mem.Allocator) !Options {
 }
 
 fn printUsage() void {
-    const stderr = std.io.getStdErr().writer();
-    _ = stderr.write(
+    std.debug.print(
         "Usage:\n" ++
             "  zig-zstd compress -i <input> -o <output> [-l <level>] [--progress] [--chunk-size <bytes>] [--threads <n>|--threads=max] [--window-log <n>] [--checksum] [--rsyncable] [--long-distance] [--no-timing]\n" ++
             "  zig-zstd decompress -i <input> -o <output> [--progress] [--chunk-size <bytes>] [--no-timing]\n" ++
@@ -149,16 +147,17 @@ fn printUsage() void {
             "  - Default compression level is 19\n" ++
             "  - --progress prints periodic progress updates\n" ++
             "  - timing output is enabled by default (use --no-timing to disable)\n",
-    ) catch {};
+        .{},
+    );
 }
 
-pub fn compressFile(allocator: std.mem.Allocator, opts: Options) !void {
-    const start_ns = std.time.nanoTimestamp();
-    var input_file = try std.fs.cwd().openFile(opts.input_path, .{});
-    defer input_file.close();
+pub fn compressFile(allocator: std.mem.Allocator, io: std.Io, opts: Options) !void {
+    const start = std.Io.Timestamp.now(io, .awake);
+    var input_file = try std.Io.Dir.cwd().openFile(io, opts.input_path, .{});
+    defer input_file.close(io);
 
-    var output_file = try std.fs.cwd().createFile(opts.output_path, .{ .truncate = true });
-    defer output_file.close();
+    var output_file = try std.Io.Dir.cwd().createFile(io, opts.output_path, .{ .truncate = true });
+    defer output_file.close(io);
 
     const in_chunk = opts.chunk_size orelse zstd.ZSTD_CStreamInSize();
     const out_chunk = zstd.ZSTD_CStreamOutSize();
@@ -199,8 +198,7 @@ pub fn compressFile(allocator: std.mem.Allocator, opts: Options) !void {
         if (@hasDecl(zstd, "ZSTD_c_rsyncable")) {
             setParam(cstream.?, zstd.ZSTD_c_rsyncable, 1, "rsyncable");
         } else {
-            const stderr = std.io.getStdErr().writer();
-            _ = stderr.write("Warning: zstd does not support rsyncable on this version\n") catch {};
+            std.debug.print("Warning: zstd does not support rsyncable on this version\n", .{});
         }
     }
     if (opts.long_distance) {
@@ -212,13 +210,16 @@ pub fn compressFile(allocator: std.mem.Allocator, opts: Options) !void {
         );
     }
 
-    const total_size = getFileSize(input_file);
+    const total_size = getFileSize(io, input_file);
     var processed: u64 = 0;
-    var last_log_ms: i64 = std.time.milliTimestamp();
+    var last_log = std.Io.Timestamp.now(io, .awake);
 
     while (true) {
-        const bytes_read = try input_file.read(in_buf);
-        if (bytes_read == 0) break;
+        const bytes_read = input_file.readStreaming(io, &.{in_buf}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => |e| return e,
+        };
+        if (bytes_read == 0) continue;
 
         processed += bytes_read;
 
@@ -227,11 +228,11 @@ pub fn compressFile(allocator: std.mem.Allocator, opts: Options) !void {
             var output = zstd.ZSTD_outBuffer{ .dst = out_buf.ptr, .size = out_buf.len, .pos = 0 };
             const res = zstd.ZSTD_compressStream2(cstream, &output, &input, zstd.ZSTD_e_continue);
             try zstdCheck(res);
-            try output_file.writeAll(out_buf[0..output.pos]);
+            try output_file.writeStreamingAll(io, out_buf[0..output.pos]);
         }
 
         if (opts.progress) {
-            logProgress("Compressing", processed, total_size, &last_log_ms);
+            logProgress(io, "Compressing", processed, total_size, &last_log);
         }
     }
 
@@ -241,26 +242,25 @@ pub fn compressFile(allocator: std.mem.Allocator, opts: Options) !void {
         const res = zstd.ZSTD_compressStream2(cstream, &output, &empty_input, zstd.ZSTD_e_end);
         try zstdCheck(res);
         if (output.pos > 0) {
-            try output_file.writeAll(out_buf[0..output.pos]);
+            try output_file.writeStreamingAll(io, out_buf[0..output.pos]);
         }
         if (res == 0) break;
     }
 
     if (opts.timing) {
-        const end_ns = std.time.nanoTimestamp();
-        const duration_ms = @as(f64, @floatFromInt(end_ns - start_ns)) / 1_000_000.0;
-        const stderr = std.io.getStdErr().writer();
-        _ = stderr.print("Compression time: {d:.2} ms\n", .{duration_ms}) catch {};
+        const elapsed = start.durationTo(std.Io.Timestamp.now(io, .awake));
+        const duration_ms = @as(f64, @floatFromInt(elapsed.nanoseconds)) / 1_000_000.0;
+        std.debug.print("Compression time: {d:.2} ms\n", .{duration_ms});
     }
 }
 
-pub fn decompressFile(allocator: std.mem.Allocator, opts: Options) !void {
-    const start_ns = std.time.nanoTimestamp();
-    var input_file = try std.fs.cwd().openFile(opts.input_path, .{});
-    defer input_file.close();
+pub fn decompressFile(allocator: std.mem.Allocator, io: std.Io, opts: Options) !void {
+    const start = std.Io.Timestamp.now(io, .awake);
+    var input_file = try std.Io.Dir.cwd().openFile(io, opts.input_path, .{});
+    defer input_file.close(io);
 
-    var output_file = try std.fs.cwd().createFile(opts.output_path, .{ .truncate = true });
-    defer output_file.close();
+    var output_file = try std.Io.Dir.cwd().createFile(io, opts.output_path, .{ .truncate = true });
+    defer output_file.close(io);
 
     const in_chunk = opts.chunk_size orelse zstd.ZSTD_DStreamInSize();
     const out_chunk = zstd.ZSTD_DStreamOutSize();
@@ -278,13 +278,16 @@ pub fn decompressFile(allocator: std.mem.Allocator, opts: Options) !void {
     const init_res = zstd.ZSTD_initDStream(dstream);
     try zstdCheck(init_res);
 
-    const total_size = getFileSize(input_file);
+    const total_size = getFileSize(io, input_file);
     var processed: u64 = 0;
-    var last_log_ms: i64 = std.time.milliTimestamp();
+    var last_log = std.Io.Timestamp.now(io, .awake);
 
     while (true) {
-        const bytes_read = try input_file.read(in_buf);
-        if (bytes_read == 0) break;
+        const bytes_read = input_file.readStreaming(io, &.{in_buf}) catch |err| switch (err) {
+            error.EndOfStream => break,
+            else => |e| return e,
+        };
+        if (bytes_read == 0) continue;
 
         processed += bytes_read;
 
@@ -294,39 +297,37 @@ pub fn decompressFile(allocator: std.mem.Allocator, opts: Options) !void {
             const res = zstd.ZSTD_decompressStream(dstream, &output, &input);
             try zstdCheck(res);
             if (output.pos > 0) {
-                try output_file.writeAll(out_buf[0..output.pos]);
+                try output_file.writeStreamingAll(io, out_buf[0..output.pos]);
             }
         }
 
         if (opts.progress) {
-            logProgress("Decompressing", processed, total_size, &last_log_ms);
+            logProgress(io, "Decompressing", processed, total_size, &last_log);
         }
     }
 
     if (opts.timing) {
-        const end_ns = std.time.nanoTimestamp();
-        const duration_ms = @as(f64, @floatFromInt(end_ns - start_ns)) / 1_000_000.0;
-        const stderr = std.io.getStdErr().writer();
-        _ = stderr.print("Decompression time: {d:.2} ms\n", .{duration_ms}) catch {};
+        const elapsed = start.durationTo(std.Io.Timestamp.now(io, .awake));
+        const duration_ms = @as(f64, @floatFromInt(elapsed.nanoseconds)) / 1_000_000.0;
+        std.debug.print("Decompression time: {d:.2} ms\n", .{duration_ms});
     }
 }
 
-fn getFileSize(file: std.fs.File) ?u64 {
-    const stat = file.stat() catch return null;
+fn getFileSize(io: std.Io, file: std.Io.File) ?u64 {
+    const stat = file.stat(io) catch return null;
     return stat.size;
 }
 
-fn logProgress(label: []const u8, processed: u64, total: ?u64, last_log_ms: *i64) void {
-    const now = std.time.milliTimestamp();
-    if (now - last_log_ms.* < 5000) return;
-    last_log_ms.* = now;
+fn logProgress(io: std.Io, label: []const u8, processed: u64, total: ?u64, last_log: *std.Io.Timestamp) void {
+    const now = std.Io.Timestamp.now(io, .awake);
+    if (last_log.durationTo(now).toMilliseconds() < 5000) return;
+    last_log.* = now;
 
-    const stderr = std.io.getStdErr().writer();
     if (total) |t| {
         const percent = if (t == 0) 0 else @as(u64, processed * 100 / t);
-        _ = stderr.print("{s}: {d}/{d} ({d}%)\n", .{ label, processed, t, percent }) catch {};
+        std.debug.print("{s}: {d}/{d} ({d}%)\n", .{ label, processed, t, percent });
     } else {
-        _ = stderr.print("{s}: {d} bytes\n", .{ label, processed }) catch {};
+        std.debug.print("{s}: {d} bytes\n", .{ label, processed });
     }
 }
 
@@ -344,7 +345,6 @@ fn getCpuCount() ?u32 {
 fn setParam(cstream: *zstd.ZSTD_CCtx, param: c_uint, value: i32, name: []const u8) void {
     const result = zstd.ZSTD_CCtx_setParameter(cstream, param, value);
     if (zstd.ZSTD_isError(result) != 0) {
-        const stderr = std.io.getStdErr().writer();
-        _ = stderr.print("Warning: failed to set {s} (error code {d})\n", .{ name, result }) catch {};
+        std.debug.print("Warning: failed to set {s} (error code {d})\n", .{ name, result });
     }
 }
