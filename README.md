@@ -8,6 +8,12 @@ A tiny zstd CLI built in Zig with a static libzstd.
 zig build
 ```
 
+Windows releases support x64 and ARM64. To cross-compile ARM64 with an x64
+Zig 0.16 compiler, use `zig build -Dtarget=aarch64-windows-gnu -Doptimize=ReleaseFast -Dcpu=baseline`.
+`zig build test-build -Dtarget=aarch64-windows-gnu` produces `zig-out/bin/test.exe`
+for execution on an ARM64 machine. Releases require these tests and a packaged
+CLI roundtrip to pass on a Windows ARM64 runner before publication.
+
 ## Usage
 
 ```bash

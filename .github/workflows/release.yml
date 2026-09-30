@@ -38,6 +38,12 @@ jobs:
           - os: windows-2025
             platform: win32
             arch: x64
+            zig-target: x86_64-windows-gnu
+          - os: windows-2025
+            platform: win32
+            arch: arm64
+            zig-target: aarch64-windows-gnu
+            cross: true
 
     runs-on: ${{ matrix.os }}
 
@@ -63,7 +69,7 @@ jobs:
       - name: Build binaries
         if: matrix.platform == 'win32'
         run: |
-          vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline
+          vendors/zig/zig build -Doptimize=ReleaseFast -Dcpu=baseline -Dtarget=${{ matrix.zig-target }}
 
       - name: Validate release contract
         run: node --test scripts/release-contract.test.js
@@ -79,8 +85,21 @@ jobs:
           fi
 
       - name: Test
+        if: matrix.cross != true
         run: |
-          vendors/zig/zig build test
+          vendors/zig/zig build test -Dtarget=${{ matrix.zig-target }}
+
+      - name: Build ARM64 tests
+        if: matrix.cross == true
+        run: vendors/zig/zig build test-build -Dtarget=${{ matrix.zig-target }}
+
+      - name: Upload ARM64 tests
+        if: matrix.cross == true
+        uses: actions/upload-artifact@v4
+        with:
+          name: arm64-tests-zig-zstd
+          path: zig-out/bin/test.exe
+          if-no-files-found: error
 
       - name: Package binaries
         run: |
@@ -102,8 +121,36 @@ jobs:
           name: zig-zstd-${{ matrix.platform }}-${{ matrix.arch }}
           path: zig-zstd-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
 
-  release:
+  test-windows-arm64:
     needs: build
+    runs-on: windows-11-arm
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.tag || github.ref }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@v4
+        with:
+          name: arm64-tests-zig-zstd
+          path: arm64-tests
+      - uses: actions/download-artifact@v4
+        with:
+          name: zig-zstd-win32-arm64
+          path: arm64-release
+      - name: Run ARM64 tests and packaged CLI
+        shell: pwsh
+        run: |
+          & ./arm64-tests/test.exe
+          if ($LASTEXITCODE -ne 0) { throw 'ARM64 unit tests failed' }
+          tar -xzf arm64-release/zig-zstd-win32-arm64.tar.gz -C arm64-release
+          if ($LASTEXITCODE -ne 0) { throw 'ARM64 archive extraction failed' }
+          node scripts/test-release-binaries.js arm64-release arm64
+          if ($LASTEXITCODE -ne 0) { throw 'ARM64 release smoke test failed' }
+
+  release:
+    needs: [build, test-windows-arm64]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -120,6 +167,7 @@ jobs:
       - name: Download all artifacts
         uses: actions/download-artifact@v4
         with:
+          pattern: zig-zstd-*
           path: artifacts
 
       - name: Publish immutable release to R2
@@ -145,7 +193,7 @@ jobs:
             Pre-built binaries for:
             - **macOS** (arm64 & x64): `zig-zstd-darwin-[arch].tar.gz`
             - **Linux** (x64 & arm64): `zig-zstd-linux-[arch].tar.gz`
-            - **Windows** (x64): `zig-zstd-win32-x64.tar.gz`
+            - **Windows** (x64 & arm64): `zig-zstd-win32-[arch].tar.gz`
 
             ## Usage
 
