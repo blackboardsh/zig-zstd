@@ -1,8 +1,6 @@
 const std = @import("std");
 
-const zstd = @cImport({
-    @cInclude("zstd.h");
-});
+const zstd = @import("zstd");
 
 const Mode = enum {
     compress,

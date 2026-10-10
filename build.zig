@@ -54,12 +54,19 @@ pub fn build(b: *std.Build) void {
         .root_module = libzstd_mod,
     });
 
+    const zstd_headers = b.addTranslateC(.{
+        .root_source_file = b.path("zstd/lib/zstd.h"),
+        .target = target,
+        .optimize = optimize,
+    });
+    const zstd_mod = zstd_headers.createModule();
+
     const exe_mod = b.createModule(.{
         .root_source_file = b.path("src/main.zig"),
         .target = target,
         .optimize = optimize,
     });
-    exe_mod.addIncludePath(b.path("zstd/lib"));
+    exe_mod.addImport("zstd", zstd_mod);
     exe_mod.linkLibrary(libzstd);
     if (target.result.os.tag == .linux) {
         exe_mod.linkSystemLibrary("pthread", .{});
@@ -77,7 +84,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    tests_mod.addIncludePath(b.path("zstd/lib"));
+    tests_mod.addImport("zstd", zstd_mod);
     tests_mod.linkLibrary(libzstd);
     if (target.result.os.tag == .linux) {
         tests_mod.linkSystemLibrary("pthread", .{});

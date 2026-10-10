@@ -6,11 +6,11 @@
  * Based on zig-bsdiff's vendoring approach
  */
 
-import { execSync } from 'child_process';
+import { execFileSync, execSync } from 'child_process';
 import { existsSync, mkdirSync, rmSync, unlinkSync } from 'fs';
 import { join } from 'path';
 
-const ZIG_VERSION = '0.16.0';
+const ZIG_VERSION = '0.17.0';
 
 async function initSubmodules() {
   console.log('Initializing git submodules...');
@@ -26,11 +26,20 @@ async function initSubmodules() {
 async function vendorZig() {
   const platform = process.platform;
   const zigBinary = platform === 'win32' ? 'zig.exe' : 'zig';
-  const zigBinPath = join(process.cwd(), 'vendors', 'zig', zigBinary);
+  const vendorsDir = join(process.cwd(), 'vendors', 'zig');
+  const zigBinPath = join(vendorsDir, zigBinary);
 
   if (existsSync(zigBinPath)) {
-    console.log('✓ Zig already vendored');
-    return;
+    try {
+      const version = execFileSync(zigBinPath, ['version'], { encoding: 'utf8' }).trim();
+      if (version === ZIG_VERSION) {
+        console.log(`✓ Zig ${ZIG_VERSION} already vendored`);
+        return;
+      }
+      console.log(`Replacing vendored Zig ${version} with ${ZIG_VERSION}...`);
+    } catch {
+      console.log(`Replacing unusable vendored Zig with ${ZIG_VERSION}...`);
+    }
   }
 
   console.log('Vendoring Zig compiler...');
@@ -38,7 +47,7 @@ async function vendorZig() {
   const arch = process.arch === 'arm64' ? 'aarch64' : 'x86_64';
 
   try {
-    const vendorsDir = join(process.cwd(), 'vendors', 'zig');
+    rmSync(vendorsDir, { recursive: true, force: true });
     mkdirSync(vendorsDir, { recursive: true });
 
     if (platform === 'darwin') {
@@ -88,6 +97,11 @@ async function vendorZig() {
     } else {
       console.error(`Unsupported platform: ${platform}`);
       process.exit(1);
+    }
+
+    const version = execFileSync(zigBinPath, ['version'], { encoding: 'utf8' }).trim();
+    if (version !== ZIG_VERSION) {
+      throw new Error(`Expected Zig ${ZIG_VERSION}, got ${version}`);
     }
   } catch (error) {
     console.error('Failed to vendor Zig:', error.message);

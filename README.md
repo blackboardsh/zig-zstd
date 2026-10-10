@@ -4,12 +4,16 @@ A tiny zstd CLI built in Zig with a static libzstd.
 
 ## Build
 
+Requires Zig 0.17.0. Run `npm run setup` to download the pinned compiler and
+initialize the zstd submodule, then `npm run build` (requires Bun), or use an
+installed Zig 0.17.0 compiler directly:
+
 ```bash
 zig build
 ```
 
-Windows releases support x64 and ARM64. To cross-compile ARM64 with an x64
-Zig 0.16 compiler, use `zig build -Dtarget=aarch64-windows-gnu -Doptimize=ReleaseFast -Dcpu=baseline`.
+Windows releases support x64 and ARM64 and are built and tested on native runners.
+To cross-compile ARM64, use `zig build -Dtarget=aarch64-windows-gnu -Doptimize=ReleaseFast -Dcpu=baseline`.
 `zig build test-build -Dtarget=aarch64-windows-gnu` produces `zig-out/bin/test.exe`
 for execution on an ARM64 machine. Releases require these tests and a packaged
 CLI roundtrip to pass on a Windows ARM64 runner before publication.

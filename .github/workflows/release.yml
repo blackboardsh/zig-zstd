@@ -39,11 +39,10 @@ jobs:
             platform: win32
             arch: x64
             zig-target: x86_64-windows-gnu
-          - os: windows-2025
+          - os: windows-11-arm
             platform: win32
             arch: arm64
             zig-target: aarch64-windows-gnu
-            cross: true
 
     runs-on: ${{ matrix.os }}
 
@@ -55,7 +54,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '18'
+          node-version: '24'
 
       - name: Setup dependencies
         run: |
@@ -85,25 +84,15 @@ jobs:
           fi
 
       - name: Test
-        if: matrix.cross != true
         run: |
           vendors/zig/zig build test -Dtarget=${{ matrix.zig-target }}
-
-      - name: Build ARM64 tests
-        if: matrix.cross == true
-        run: vendors/zig/zig build test-build -Dtarget=${{ matrix.zig-target }}
-
-      - name: Upload ARM64 tests
-        if: matrix.cross == true
-        uses: actions/upload-artifact@v4
-        with:
-          name: arm64-tests-zig-zstd
-          path: zig-out/bin/test.exe
-          if-no-files-found: error
 
       - name: Package binaries
         run: |
           node scripts/package-binaries.js
+
+      - name: Test packaged binaries
+        run: node scripts/test-release-binaries.js dist ${{ matrix.arch }}
 
       - name: Create tarball
         shell: bash
@@ -121,36 +110,8 @@ jobs:
           name: zig-zstd-${{ matrix.platform }}-${{ matrix.arch }}
           path: zig-zstd-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz
 
-  test-windows-arm64:
-    needs: build
-    runs-on: windows-11-arm
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.tag || github.ref }}
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '24'
-      - uses: actions/download-artifact@v4
-        with:
-          name: arm64-tests-zig-zstd
-          path: arm64-tests
-      - uses: actions/download-artifact@v4
-        with:
-          name: zig-zstd-win32-arm64
-          path: arm64-release
-      - name: Run ARM64 tests and packaged CLI
-        shell: pwsh
-        run: |
-          & ./arm64-tests/test.exe
-          if ($LASTEXITCODE -ne 0) { throw 'ARM64 unit tests failed' }
-          tar -xzf arm64-release/zig-zstd-win32-arm64.tar.gz -C arm64-release
-          if ($LASTEXITCODE -ne 0) { throw 'ARM64 archive extraction failed' }
-          node scripts/test-release-binaries.js arm64-release arm64
-          if ($LASTEXITCODE -ne 0) { throw 'ARM64 release smoke test failed' }
-
   release:
-    needs: [build, test-windows-arm64]
+    needs: build
     runs-on: ubuntu-latest
     permissions:
       contents: write
